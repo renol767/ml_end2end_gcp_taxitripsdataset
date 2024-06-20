@@ -1,0 +1,680 @@
+# PIPELINE DEFINITION
+# Name: tabular-demo-dataset-1-training-singapore
+# Inputs:
+#    MACHINE_TYPE: str
+#    MODEL_DISPLAY_NAME: str
+#    bigquery_dataset: str
+#    gcp_region: str
+#    project: str
+# Outputs:
+#    test-model-metrics: system.Metrics
+components:
+  comp-create-tensorflow-model:
+    executorLabel: exec-create-tensorflow-model
+    inputDefinitions:
+      parameters:
+        activation_name:
+          parameterType: STRING
+        hidden_layer_sizes:
+          parameterType: NUMBER_INTEGER
+        input_size:
+          parameterType: NUMBER_INTEGER
+        output_activation_name:
+          parameterType: STRING
+        output_size:
+          parameterType: NUMBER_INTEGER
+    outputDefinitions:
+      artifacts:
+        Base_Model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+  comp-deploy-model-to-vertex-ai-endpoint:
+    executorLabel: exec-deploy-model-to-vertex-ai-endpoint
+    inputDefinitions:
+      parameters:
+        accelerator_count:
+          isOptional: true
+          parameterType: STRING
+        accelerator_type:
+          isOptional: true
+          parameterType: STRING
+        endpoint_name:
+          isOptional: true
+          parameterType: STRING
+        machine_type:
+          defaultValue: n1-standard-2
+          isOptional: true
+          parameterType: STRING
+        max_replica_count:
+          defaultValue: 1.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+        min_replica_count:
+          defaultValue: 1.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+        model_name:
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        endpoint_name:
+          parameterType: STRING
+  comp-get-cleaned-data:
+    executorLabel: exec-get-cleaned-data
+    inputDefinitions:
+      parameters:
+        bq_source:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        Clean_Data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        path:
+          parameterType: STRING
+  comp-split-the-data:
+    executorLabel: exec-split-the-data
+    inputDefinitions:
+      artifacts:
+        Clean_Data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        Train_Data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        Val_Data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-test-model:
+    executorLabel: exec-test-model
+    inputDefinitions:
+      artifacts:
+        Trained_Model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+        Val_Data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        batch_size:
+          parameterType: NUMBER_INTEGER
+        label_column_name:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        metrics:
+          artifactType:
+            schemaTitle: system.Metrics
+            schemaVersion: 0.0.1
+  comp-train-model:
+    executorLabel: exec-train-model
+    inputDefinitions:
+      artifacts:
+        Base_Model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+        Train_Data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        batch_size:
+          parameterType: NUMBER_INTEGER
+        label_column_name:
+          parameterType: STRING
+        learning_rate:
+          parameterType: NUMBER_DOUBLE
+        loss_function_name:
+          parameterType: STRING
+        metric_names:
+          parameterType: STRING
+        number_of_epochs:
+          parameterType: NUMBER_INTEGER
+        optimizer_name:
+          parameterType: STRING
+        random_seed:
+          parameterType: NUMBER_INTEGER
+    outputDefinitions:
+      artifacts:
+        Trained_Model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+  comp-upload-model-to-vertex-ai:
+    executorLabel: exec-upload-model-to-vertex-ai
+    inputDefinitions:
+      artifacts:
+        Trained_Model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+      parameters:
+        description:
+          parameterType: STRING
+        display_name:
+          parameterType: STRING
+        location:
+          parameterType: STRING
+        project:
+          parameterType: STRING
+        use_gpu:
+          parameterType: BOOLEAN
+    outputDefinitions:
+      parameters:
+        resource_name:
+          parameterType: STRING
+defaultPipelineRoot: gs://dla-ml-specialization-demo-dataset1-singapore/pipeline_root/demo-dataset-1
+deploymentSpec:
+  executors:
+    exec-create-tensorflow-model:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - create_tensorflow_model
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.7.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-storage'\
+          \ 'fsspec' 'gcsfs' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef create_tensorflow_model(input_size: int,\n                  \
+          \          hidden_layer_sizes: int,\n                            output_size:\
+          \ int ,\n                            activation_name: str,\n           \
+          \                 output_activation_name: str,\n                       \
+          \     Base_Model: Output[Model]):\n    import tensorflow as tf\n    tf.random.set_seed(seed=0)\n\
+          \    model = tf.keras.models.Sequential()\n    model.add(tf.keras.Input(shape=(input_size,)))\n\
+          \    for layer_size in [hidden_layer_sizes]:\n        model.add(tf.keras.layers.Dense(units=layer_size,\
+          \ activation=activation_name))\n    # The last layer is left without activation\n\
+          \    model.add(tf.keras.layers.Dense(units=output_size, activation=output_activation_name))\n\
+          \    tf.keras.models.save_model(model, f'{Base_Model.path}')\n\n"
+        image: gcr.io/deeplearning-platform-release/tf2-cpu.2-9:latest
+    exec-deploy-model-to-vertex-ai-endpoint:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - deploy_model_to_vertex_ai_endpoint
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.7.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-aiplatform'\
+          \ 'google-cloud-storage' 'fsspec' 'gcsfs' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef deploy_model_to_vertex_ai_endpoint(\n          model_name: str,\n\
+          \          endpoint_name: str = None,\n          machine_type: str = \"\
+          n1-standard-2\",\n          min_replica_count: int = 1,\n          max_replica_count:\
+          \ int = 1,\n          accelerator_type: str = None,\n          accelerator_count:\
+          \ str = None,\n      )-> NamedTuple(\"Outputs\", [(\"endpoint_name\", str)]):\n\
+          \        import json\n        from google.cloud import aiplatform\n\n  \
+          \      model = aiplatform.Model(model_name=model_name)\n\n        if endpoint_name:\n\
+          \            endpoint = aiplatform.Endpoint(endpoint_name=endpoint_name)\n\
+          \        else:\n            endpoint_display_name = model.display_name[:118]\
+          \ + \"_endpoint\"\n            endpoint = aiplatform.Endpoint.create(\n\
+          \                display_name=endpoint_display_name,\n                project=model.project,\n\
+          \                location=model.location,\n            )\n\n        endpoint\
+          \ = model.deploy(\n            endpoint=endpoint,\n            # deployed_model_display_name=deployed_model_display_name,\n\
+          \            machine_type=machine_type,\n            min_replica_count=min_replica_count,\n\
+          \            max_replica_count=max_replica_count,\n            accelerator_type=accelerator_type,\n\
+          \            accelerator_count=accelerator_count,\n            # service_account=service_account,\n\
+          \            # explanation_metadata=explanation_metadata,\n            #\
+          \ explanation_parameters=explanation_parameters,\n            # encryption_spec_key_name=encryption_spec_key_name,\n\
+          \        )\n\n        endpoint_json = json.dumps(endpoint.to_dict(), indent=2)\n\
+          \        print(endpoint_json)\n        endpoint_name = endpoint.resource_name\n\
+          \        return (endpoint_name,)\n\n"
+        image: gcr.io/deeplearning-platform-release/tf2-cpu.2-9:latest
+    exec-get-cleaned-data:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - get_cleaned_data
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.7.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-bigquery'\
+          \ 'google-cloud-storage' 'pandas' 'db-dtypes' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef get_cleaned_data(bq_source: str, Clean_Data: Output[Dataset])\
+          \ -> NamedTuple(\"Outputs\", [(\"path\", str)]):\n    from google.cloud\
+          \ import bigquery\n    from google.cloud import storage\n    client = bigquery.Client(project='dla-ml-specialization',\
+          \ location='asia-southeast1')\n    QUERY = f\"\"\"\n        SELECT trip_seconds,\
+          \ trip_miles, pickup_community_area, dropoff_community_area, fare, tolls,\
+          \ extras, tips FROM `{bq_source}`\n    \"\"\"\n\n    df = client.query(QUERY).to_dataframe()\n\
+          \    df.to_csv(f'{Clean_Data.path}.csv', index=False)\n\n"
+        image: python:3.7
+    exec-split-the-data:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - split_the_data
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.7.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'scikit-learn'\
+          \ 'pandas' 'google-cloud-storage' 'fsspec' 'gcsfs' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef split_the_data(Clean_Data: Input[Dataset], Train_Data: Output[Dataset],\
+          \ Val_Data: Output[Dataset]):\n    from sklearn.model_selection import train_test_split\n\
+          \    import pandas as pd\n    df = pd.read_csv(f'{Clean_Data.path}.csv')\n\
+          \    train, test = train_test_split(df, test_size=0.2)\n    train.to_csv(f'{Train_Data.path}.csv',\
+          \ index=False)\n    test.to_csv(f'{Val_Data.path}.csv', index=False)\n\n"
+        image: python:3.7
+    exec-test-model:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - test_model
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.7.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'numpy' 'google-cloud-storage'\
+          \ 'fsspec' 'gcsfs' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef test_model(\n        Trained_Model: Input[Model],\n        Val_Data:\
+          \ Input[Dataset],\n        label_column_name:str,\n        batch_size:int,\n\
+          \        metrics: Output[Metrics]):\n    import tensorflow as tf\n    model\
+          \ = tf.saved_model.load(export_dir=f'{Trained_Model.path}')\n\n    dataset\
+          \ = tf.data.experimental.make_csv_dataset(\n        file_pattern=f'{Val_Data.path}.csv',\n\
+          \        batch_size=batch_size,\n        label_name=label_column_name,\n\
+          \        header=True,\n        num_epochs=1,\n        shuffle=False,\n \
+          \       ignore_errors=False,\n    )\n\n    def stack_feature_batches(features_batch,\
+          \ labels_batch):\n        # Need to stack individual feature columns to\
+          \ create a single feature tensor\n        # Need to cast all column tensor\
+          \ types to float to prevent error:\n        # TypeError: Tensors in list\
+          \ passed to 'values' of 'Pack' Op have types [int32, float32, float32, int32,\
+          \ int32] that don't all match.\n        list_of_feature_batches = list(tf.cast(x=feature_batch,\
+          \ dtype=tf.float32) for feature_batch in features_batch.values())\n    \
+          \    return tf.stack(list_of_feature_batches, axis=-1), labels_batch\n \
+          \   dataset_with_label = dataset.map(stack_feature_batches)\n    mse = tf.keras.metrics.MeanSquaredError()\n\
+          \    rmse = tf.keras.metrics.RootMeanSquaredError()\n    mae  = tf.keras.metrics.MeanAbsoluteError()\n\
+          \    for features_batch, labels_batch in dataset_with_label:  # Assuming\
+          \ you have labels in your dataset\n        predictions_tensor = model(features_batch)\n\
+          \n        # Update metrics\n        mse.update_state(labels_batch, predictions_tensor)\n\
+          \        rmse.update_state(labels_batch, predictions_tensor)\n        mae.update_state(labels_batch,\
+          \ predictions_tensor)\n\n    # Get the results\n    mse_result = mse.result().numpy()\n\
+          \    rmse_result = rmse.result().numpy()\n    mae_result = mae.result().numpy()\n\
+          \    metrics.log_metric(\"mean_absolute_error\", float(mae_result))\n  \
+          \  metrics.log_metric(\"mean_squared_error\", float(mse_result))\n    metrics.log_metric(\"\
+          root_mean_squared_error\", float(rmse_result))\n\n"
+        image: gcr.io/deeplearning-platform-release/tf2-cpu.2-9:latest
+    exec-train-model:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - train_model
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.7.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-storage'\
+          \ 'fsspec' 'gcsfs' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef train_model(\n        Base_Model: Input[Model],\n        Train_Data:\
+          \ Input[Dataset],\n        learning_rate:float,\n        optimizer_name:str,\n\
+          \        loss_function_name:str,\n        batch_size:int,\n        label_column_name:str,\n\
+          \        random_seed:int,\n        metric_names:str,\n        number_of_epochs:int,\n\
+          \        Trained_Model: Output[Model]):\n    import tensorflow as tf\n \
+          \   tf.random.set_seed(seed=0)\n    keras_model = tf.keras.models.load_model(filepath=f'{Base_Model.path}')\n\
+          \    optimizer_parameters = {}\n    optimizer_parameters[\"learning_rate\"\
+          ] = learning_rate\n    optimizer_config = {\n        \"class_name\": optimizer_name,\n\
+          \        \"config\": optimizer_parameters,\n    }\n    optimizer = tf.keras.optimizers.get(optimizer_config)\n\
+          \    loss = tf.keras.losses.get(loss_function_name)\n    training_dataset\
+          \ = tf.data.experimental.make_csv_dataset(\n        file_pattern=f'{Train_Data.path}.csv',\n\
+          \        batch_size=batch_size,\n        label_name=label_column_name,\n\
+          \        header=True,\n        # Need to specify num_epochs=1 otherwise\
+          \ the training becomes infinite\n        num_epochs=1,\n        shuffle=True,\n\
+          \        shuffle_seed=random_seed,\n        ignore_errors=True,\n    )\n\
+          \    def stack_feature_batches(features_batch, labels_batch):\n        #\
+          \ Need to stack individual feature columns to create a single feature tensor\n\
+          \        # Need to cast all column tensor types to float to prevent error:\n\
+          \        # TypeError: Tensors in list passed to 'values' of 'Pack' Op have\
+          \ types [int32, float32, float32, int32, int32] that don't all match.\n\
+          \        list_of_feature_batches = list(tf.cast(x=feature_batch, dtype=tf.float32)\
+          \ for feature_batch in features_batch.values())\n        return tf.stack(list_of_feature_batches,\
+          \ axis=-1), labels_batch\n\n    training_dataset = training_dataset.map(stack_feature_batches)\n\
+          \    if metric_names == '':\n        metric_names = None\n    keras_model.compile(\n\
+          \        optimizer=optimizer,\n        loss=loss,\n        metrics=metric_names,\n\
+          \    )\n    keras_model.fit(\n        training_dataset,\n        epochs=number_of_epochs,\n\
+          \    )\n\n    tf.keras.models.save_model(keras_model, f'{Trained_Model.path}')\n\
+          \n"
+        image: gcr.io/deeplearning-platform-release/tf2-cpu.2-9:latest
+    exec-upload-model-to-vertex-ai:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - upload_model_to_vertex_ai
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.7.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-aiplatform'\
+          \ 'google-cloud-storage' 'fsspec' 'gcsfs' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef upload_model_to_vertex_ai(\n    Trained_Model: Input[Model],\n\
+          \    use_gpu: bool,\n    display_name: str,\n    description: str,\n   \
+          \ project: str,\n    location: str,\n)-> NamedTuple(\"Outputs\", [(\"resource_name\"\
+          , str)]):\n    import json\n    from google.cloud import aiplatform\n\n\
+          \    model = aiplatform.Model.upload_tensorflow_saved_model(\n        saved_model_dir=f'{Trained_Model.path}',\n\
+          \        tensorflow_version=\"2.9\",\n        use_gpu=use_gpu,\n\n     \
+          \   display_name=display_name,\n        description=description,\n\n   \
+          \     project=project,\n        location=location,\n    )\n    model_json\
+          \ = json.dumps(model.to_dict(), indent=2)\n    print(model_json)\n    resource_name\
+          \ = model.resource_name\n    return (resource_name,)\n\n"
+        image: gcr.io/deeplearning-platform-release/tf2-cpu.2-9:latest
+pipelineInfo:
+  name: tabular-demo-dataset-1-training-singapore
+root:
+  dag:
+    outputs:
+      artifacts:
+        test-model-metrics:
+          artifactSelectors:
+          - outputArtifactKey: metrics
+            producerSubtask: test-model
+    tasks:
+      create-tensorflow-model:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-create-tensorflow-model
+        inputs:
+          parameters:
+            activation_name:
+              runtimeValue:
+                constant: elu
+            hidden_layer_sizes:
+              runtimeValue:
+                constant: 10.0
+            input_size:
+              runtimeValue:
+                constant: 7.0
+            output_activation_name:
+              runtimeValue:
+                constant: sigmoid
+            output_size:
+              runtimeValue:
+                constant: 1.0
+        taskInfo:
+          name: create-tensorflow-model
+      deploy-model-to-vertex-ai-endpoint:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-deploy-model-to-vertex-ai-endpoint
+        dependentTasks:
+        - upload-model-to-vertex-ai
+        inputs:
+          parameters:
+            machine_type:
+              componentInputParameter: MACHINE_TYPE
+            model_name:
+              taskOutputParameter:
+                outputParameterKey: resource_name
+                producerTask: upload-model-to-vertex-ai
+        taskInfo:
+          name: deploy-model-to-vertex-ai-endpoint
+      get-cleaned-data:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-get-cleaned-data
+        inputs:
+          parameters:
+            bq_source:
+              componentInputParameter: bigquery_dataset
+        taskInfo:
+          name: get-cleaned-data
+      split-the-data:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-split-the-data
+        dependentTasks:
+        - get-cleaned-data
+        inputs:
+          artifacts:
+            Clean_Data:
+              taskOutputArtifact:
+                outputArtifactKey: Clean_Data
+                producerTask: get-cleaned-data
+        taskInfo:
+          name: split-the-data
+      test-model:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-test-model
+        dependentTasks:
+        - split-the-data
+        - train-model
+        inputs:
+          artifacts:
+            Trained_Model:
+              taskOutputArtifact:
+                outputArtifactKey: Trained_Model
+                producerTask: train-model
+            Val_Data:
+              taskOutputArtifact:
+                outputArtifactKey: Val_Data
+                producerTask: split-the-data
+          parameters:
+            batch_size:
+              runtimeValue:
+                constant: 1.0
+            label_column_name:
+              runtimeValue:
+                constant: tips
+        taskInfo:
+          name: test-model
+      train-model:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-train-model
+        dependentTasks:
+        - create-tensorflow-model
+        - split-the-data
+        inputs:
+          artifacts:
+            Base_Model:
+              taskOutputArtifact:
+                outputArtifactKey: Base_Model
+                producerTask: create-tensorflow-model
+            Train_Data:
+              taskOutputArtifact:
+                outputArtifactKey: Train_Data
+                producerTask: split-the-data
+          parameters:
+            batch_size:
+              runtimeValue:
+                constant: 32.0
+            label_column_name:
+              runtimeValue:
+                constant: tips
+            learning_rate:
+              runtimeValue:
+                constant: 0.1
+            loss_function_name:
+              runtimeValue:
+                constant: mean_squared_error
+            metric_names:
+              runtimeValue:
+                constant: ''
+            number_of_epochs:
+              runtimeValue:
+                constant: 1000.0
+            optimizer_name:
+              runtimeValue:
+                constant: Adadelta
+            random_seed:
+              runtimeValue:
+                constant: 0.0
+        taskInfo:
+          name: train-model
+      upload-model-to-vertex-ai:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-upload-model-to-vertex-ai
+        dependentTasks:
+        - train-model
+        inputs:
+          artifacts:
+            Trained_Model:
+              taskOutputArtifact:
+                outputArtifactKey: Trained_Model
+                producerTask: train-model
+          parameters:
+            description:
+              runtimeValue:
+                constant: ''
+            display_name:
+              componentInputParameter: MODEL_DISPLAY_NAME
+            location:
+              componentInputParameter: gcp_region
+            project:
+              componentInputParameter: project
+            use_gpu:
+              runtimeValue:
+                constant: false
+        taskInfo:
+          name: upload-model-to-vertex-ai
+  inputDefinitions:
+    parameters:
+      MACHINE_TYPE:
+        parameterType: STRING
+      MODEL_DISPLAY_NAME:
+        parameterType: STRING
+      bigquery_dataset:
+        parameterType: STRING
+      gcp_region:
+        parameterType: STRING
+      project:
+        parameterType: STRING
+  outputDefinitions:
+    artifacts:
+      test-model-metrics:
+        artifactType:
+          schemaTitle: system.Metrics
+          schemaVersion: 0.0.1
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.7.0

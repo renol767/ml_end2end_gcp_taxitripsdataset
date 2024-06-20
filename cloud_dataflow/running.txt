@@ -1,0 +1,21 @@
+
+Metadata:
+
+POST /v1b3/projects/dla-ml-specialization/locations/asia-southeast2/templates:launch?gcsPath=gs://dla-ml-specialization-demo-dataset-1/DATAFLOW/templates/templates.json
+{
+    "jobName": "beam_test",
+    "environment": {
+        "bypassTempDirValidation": false,
+        "tempLocation": "GCS temp Location",
+        "ipConfiguration": "WORKER_IP_UNSPECIFIED",
+        "enableStreamingEngine": false,
+        "additionalExperiments": [],
+        "additionalUserLabels": {}
+    },
+    "parameters": {
+        "data": "GCS Path the Dataset"
+    }
+}
+
+Generate Template
+python pipeline.py --runner='DataflowRunner' --template_location='GCSPATH template.json' --temp_location='GCS temp location' --staging_location='GCS stagging location' --project='PROJECT ID' --region='asia-southeast1' --experiments=use_runner_v2
