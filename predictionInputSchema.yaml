@@ -1,0 +1,24 @@
+type: array
+properties:
+  trip_seconds:
+    type: number
+  trip_miles:
+    type: number
+  pickup_community_area:
+    type: number
+  dropoff_community_area:
+    type: number
+  fare:
+    type: number
+  tolls:
+    type: number
+  extras:
+    type: number
+required:
+- trip_seconds
+- trip_miles
+- pickup_community_area
+- dropoff_community_area
+- fare
+- tolls
+- extras
