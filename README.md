@@ -2,6 +2,8 @@
 Package Dependencies :
 -   [pandas](https://github.com/pandas-dev/pandas)
 -   [google-cloud-bigquery](https://github.com/googleapis/python-bigquery)
+-   [ydata_profiling](https://github.com/ydataai/ydata-profiling)
+-   [numpy](https://github.com/numpy/numpy)
 
 ## Load Data
 Connects to a Google BigQuery project using a service account and retrieves data from a specified dataset.
